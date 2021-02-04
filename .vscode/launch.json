@@ -1,0 +1,14 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Test",
+            "type": "cppvsdbg",
+            "request": "launch",
+            "program": "luamake",
+            "args": ["test"],
+            "cwd": "${workspaceFolder}",
+            "environment": []
+        }
+    ]
+}
