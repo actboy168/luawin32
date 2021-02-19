@@ -86,16 +86,15 @@ namespace win32 {
     struct function {
         function(const metadata::api* api, void* address)
             : m_signature(api->method.Signature())
-            , m_params(m_signature.ParamCount())
-            , m_caller(caller::create((uintptr_t)address, m_params.data(), m_params.size()))
+            , m_caller(caller::create((uintptr_t)address, m_signature.ParamCount()))
         { }
         int run(lua_State* L) {
             if (!m_caller) {
                 return 0;
             }
-            int i = 1;
+            int i = 0;
             for (const auto& param : m_signature.Params()) {
-                m_params[i-1] = type_convert::fromlua(L, param.Type(), i);
+                m_caller->set(i, type_convert::fromlua(L, param.Type(), i + 1));
                 i++;
             }
             uintptr_t res = m_caller->call();
@@ -112,9 +111,8 @@ namespace win32 {
             lua_pushlightuserdata(L, (void*)new function(api, address));
             lua_pushcclosure(L, luafunction, 1);
         }
-        MethodDefSig           m_signature;
-        std::vector<uintptr_t> m_params;
-        const caller*          m_caller;
+        MethodDefSig m_signature;
+        caller*      m_caller;
     };
 
     static int apis_get(lua_State* L) {
