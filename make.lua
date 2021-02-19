@@ -4,9 +4,9 @@ lm.mode = "debug"
 
 lm:lua_dll "win32" {
     includes = {
-        "winmd"
+        "src/winmd"
     },
     sources = {
-        "win32.cpp"
+        "src/win32.cpp"
     }
 }
