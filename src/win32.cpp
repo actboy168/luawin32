@@ -1,5 +1,6 @@
 #include <winmd_reader.h>
 #include <lua.hpp>
+#include "caller.h"
 
 using namespace winmd::reader;
 
@@ -82,57 +83,22 @@ namespace win32 {
         }
     };
 
-    template <typename>
-    struct function_type_;
-    template <size_t ...IS>
-    struct function_type_<std::index_sequence<IS...>> {
-        using type = uintptr_t (__stdcall *)(decltype(IS, uintptr_t())...);
-    };
-    template <size_t N>
-    using function_type = typename function_type_<std::make_index_sequence<N>>::type;
-
-    struct basic_caller {
-        virtual uintptr_t call() = 0;
-    };
-
-    template <size_t N>
-    struct caller : public basic_caller {
-        function_type<N> f;
-        const uintptr_t* params;
-        caller(uintptr_t f_, const uintptr_t* params_) : f(reinterpret_cast<function_type<N>>(f_)), params(params_) {}
-        uintptr_t call();
-    };
-    template <> uintptr_t caller<0>::call() { return f(); }
-    template <> uintptr_t caller<1>::call() { return f(params[0]); }
-    template <> uintptr_t caller<2>::call() { return f(params[0],params[1]); }
-    template <> uintptr_t caller<3>::call() { return f(params[0],params[1],params[2]); }
-    template <> uintptr_t caller<4>::call() { return f(params[0],params[1],params[2],params[3]); }
-    template <> uintptr_t caller<5>::call() { return f(params[0],params[1],params[2],params[3],params[4]); }
-
     struct function {
         function(const metadata::api* api, void* address)
-            : m_address((uintptr_t)address)
-            , m_signature(api->method.Signature()) {
-            m_params.resize(m_signature.ParamCount());
-        }
-        uintptr_t call() {
-            switch (m_params.size()) {
-            case 0: 
-            case 1: return caller<1>{m_address, m_params.data()}.call();
-            case 2: return caller<2>{m_address, m_params.data()}.call();
-            case 3: return caller<3>{m_address, m_params.data()}.call();
-            case 4: return caller<4>{m_address, m_params.data()}.call();
-            case 5: return caller<5>{m_address, m_params.data()}.call();
-            default: return 0;
-            }
-        }
+            : m_signature(api->method.Signature())
+            , m_params(m_signature.ParamCount())
+            , m_caller(caller::create((uintptr_t)address, m_params.data(), m_params.size()))
+        { }
         int run(lua_State* L) {
+            if (!m_caller) {
+                return 0;
+            }
             int i = 1;
             for (const auto& param : m_signature.Params()) {
                 m_params[i-1] = type_convert::fromlua(L, param.Type(), i);
                 i++;
             }
-            uintptr_t res = call();
+            uintptr_t res = m_caller->call();
             if (!m_signature.ReturnType()) {
                 return 0;
             }
@@ -146,9 +112,9 @@ namespace win32 {
             lua_pushlightuserdata(L, (void*)new function(api, address));
             lua_pushcclosure(L, luafunction, 1);
         }
-        uintptr_t              m_address;
-        std::vector<uintptr_t> m_params;
         MethodDefSig           m_signature;
+        std::vector<uintptr_t> m_params;
+        const caller*          m_caller;
     };
 
     static int apis_get(lua_State* L) {

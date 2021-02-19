@@ -7,6 +7,6 @@ lm:lua_dll "win32" {
         "src/winmd"
     },
     sources = {
-        "src/win32.cpp"
+        "src/*.cpp"
     }
 }
