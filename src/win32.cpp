@@ -73,11 +73,17 @@ namespace win32 {
             return 0;
         }
         static uintptr_t fromlua(lua_State* L, TypeSig type, int idx) {
-            if (type.ptr_count() == 1 && type.element_type() == ElementType::I1) {
-                if (lua_isnoneornil(L, idx)) {
+            if (type.ptr_count() > 0) {
+                switch (lua_type(L, idx)) {
+                case LUA_TNONE:
+                case LUA_TNIL:
+                    return 0;
+                case LUA_TSTRING:
+                    return (uintptr_t)luaL_checkstring(L, idx);
+                default:
+                    luaL_error(L, "#%d cannot be converted to pointer.", idx);
                     return 0;
                 }
-                return (uintptr_t)luaL_checkstring(L, idx);
             }
             return luaL_checkinteger(L, idx);
         }
