@@ -147,7 +147,7 @@ namespace win32 {
         lua_rawset(L, -4);
         return 1;
     }
-    static int open_apis(lua_State* L, database const& db) {
+    static int init_apis(lua_State* L, database const& db) {
         static apis_t apis(db);
         lua_newtable(L);
         static luaL_Reg mt[] = {
@@ -217,7 +217,7 @@ namespace win32 {
         lua_rawset(L, -4);
         return 1;
     }
-    static int open_constants(lua_State* L, database const& db) {
+    static int init_constants(lua_State* L, database const& db) {
         static constants_t constants(db);
         lua_newtable(L);
         static luaL_Reg mt[] = {
@@ -230,18 +230,35 @@ namespace win32 {
         lua_setmetatable(L, -2);
         return 1;
     }
+    static int init_version(lua_State* L, database const& db) {
+        auto version = db.Assembly[0].Version();
+        lua_newtable(L);
+        lua_pushinteger(L, version.MajorVersion);
+        lua_setfield(L, -2, "MajorVersion");
+        lua_pushinteger(L, version.MinorVersion);
+        lua_setfield(L, -2, "MinorVersion");
+        lua_pushinteger(L, version.BuildNumber);
+        lua_setfield(L, -2, "BuildNumber");
+        lua_pushinteger(L, version.RevisionNumber);
+        lua_setfield(L, -2, "RevisionNumber");
+        return 1;
+    }
     static int open(lua_State* L) {
         static database db("Windows.Win32.winmd"sv);
-        static luaL_Reg l[] = {
+        struct {
+            const char* name;
+            int (*func)(lua_State* L, database const& db);
+        } init[] = {
+            { "apis", init_apis },
+            { "constants", init_constants },
+            { "version", init_version },
             { NULL, NULL },
         };
-        luaL_newlib(L, l);
-        lua_pushstring(L, "apis");
-        open_apis(L, db);
-        lua_rawset(L, -3);
-        lua_pushstring(L, "constants");
-        open_constants(L, db);
-        lua_rawset(L, -3);
+        lua_newtable(L);
+        for (auto l = init; l->name != NULL; l++) {
+            l->func(L, db);
+            lua_setfield(L, -2, l->name);
+        }
         return 1;
     }
 }
