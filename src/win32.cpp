@@ -140,7 +140,6 @@ namespace win32 {
         if (!address) {
             return luaL_error(L, "%s can't load.", name.data());
         }
-        auto ignature = api->method.Signature();
         function::push(L, api, address);
         lua_pushvalue(L, -1);
         lua_insert(L, 2);
