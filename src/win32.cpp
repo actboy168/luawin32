@@ -1,6 +1,7 @@
 #include <winmd_reader.h>
 #include <lua.hpp>
 #include "caller.h"
+#include "cache.h"
 
 using namespace winmd::reader;
 
@@ -13,46 +14,7 @@ namespace win32 {
         return {str, len};
     }
 
-    template <typename T>
-    const T* tablefind(std::map<std::string_view, T> const& m, std::string_view const& name) noexcept {
-        auto it = m.find(name);
-        if (it == m.end()) {
-            return nullptr;
-        }
-        return &it->second;
-    }
-
-    struct api_t {
-        std::string_view module;
-        MethodDef        method;
-        uint16_t         flags;
-    };
-    struct apis_t : public std::map<std::string_view, api_t> {
-        apis_t(database const& db){
-            for (auto&& impl : db.ImplMap) {
-                try_emplace(impl.ImportName(), api_t {
-                    impl.ImportScope().Name(),
-                    impl.MemberForwarded(),
-                    impl.MappingFlags()
-                });
-            }
-        }
-    };
-
-    struct constant_t {
-        Constant value;
-    };
-    struct constants_t : public std::map<std::string_view, constant_t> {
-        constants_t(database const& db){
-            for (auto&& field : db.Field) {
-                try_emplace(field.Name(), constant_t {
-                    field.Constant()
-                });
-            }
-        }
-    };
-
-    class native_apis {
+    class native_modules {
     public:
         void* find(std::string_view module, std::string_view api) {
             HMODULE dll = find_module(module);
@@ -97,7 +59,7 @@ namespace win32 {
     };
 
     struct function {
-        function(const api_t* api, void* address)
+        function(const win32::api_t* api, void* address)
             : m_signature(api->method.Signature())
             , m_caller(caller::create((uintptr_t)address, m_signature.ParamCount()))
         { }
@@ -120,7 +82,7 @@ namespace win32 {
             function& f = *(function*)lua_touserdata(L, lua_upvalueindex(1));
             return f.run(L);
         }
-        static void push(lua_State* L, const api_t* api, void* address) {
+        static void push(lua_State* L, const win32::api_t* api, void* address) {
             lua_pushlightuserdata(L, (void*)new function(api, address));
             lua_pushcclosure(L, luafunction, 1);
         }
@@ -129,10 +91,10 @@ namespace win32 {
     };
 
     static int apis_get(lua_State* L) {
-        static native_apis native_apis;
-        auto apis = (const apis_t*)lua_touserdata(L, lua_upvalueindex(1));
+        static native_modules native_apis;
+        auto cache = (const win32::cache*)lua_touserdata(L, lua_upvalueindex(1));
         auto name = lua_checkstrview(L, 2);
-        auto api = tablefind(*apis, name);
+        auto api = cache->find_api(name);
         if (!api) {
             return luaL_error(L, "%s not found.", name.data());
         }
@@ -146,63 +108,61 @@ namespace win32 {
         lua_rawset(L, -4);
         return 1;
     }
-    static int init_apis(lua_State* L, database const& db) {
-        static apis_t apis(db);
+    static int init_apis(lua_State* L, win32::cache const& cache) {
         lua_newtable(L);
         static luaL_Reg mt[] = {
             { "__index", apis_get },
             { NULL, NULL },
         };
         luaL_newlibtable(L, mt);
-        lua_pushlightuserdata(L, (void*)&apis);
+        lua_pushlightuserdata(L, (void*)&cache);
         luaL_setfuncs(L, mt, 1);
         lua_setmetatable(L, -2);
         return 1;
     }
     static int constants_get(lua_State* L) {
-        auto constants = (const constants_t*)lua_touserdata(L, lua_upvalueindex(1));
+        auto cache = (const win32::cache*)lua_touserdata(L, lua_upvalueindex(1));
         auto name = lua_checkstrview(L, 2);
-        auto constant = tablefind(*constants, name);
+        auto constant = cache->find_constant(name);
         if (!constant) {
             return luaL_error(L, "%s not found.", name.data());
         }
-        auto value = constant->value;
-        switch (value.Type()) {
+        switch (constant->Type()) {
         case ConstantType::Boolean:
-            lua_pushboolean(L, value.ValueBoolean());
+            lua_pushboolean(L, constant->ValueBoolean());
             break;
         case ConstantType::Char:
-            lua_pushinteger(L, value.ValueChar());
+            lua_pushinteger(L, constant->ValueChar());
             break;
         case ConstantType::Int8:
-            lua_pushinteger(L, value.ValueInt8());
+            lua_pushinteger(L, constant->ValueInt8());
             break;
         case ConstantType::UInt8:
-            lua_pushinteger(L, value.ValueUInt8());
+            lua_pushinteger(L, constant->ValueUInt8());
             break;
         case ConstantType::Int16:
-            lua_pushinteger(L, value.ValueInt16());
+            lua_pushinteger(L, constant->ValueInt16());
             break;
         case ConstantType::UInt16:
-            lua_pushinteger(L, value.ValueUInt16());
+            lua_pushinteger(L, constant->ValueUInt16());
             break;
         case ConstantType::Int32:
-            lua_pushinteger(L, value.ValueInt32());
+            lua_pushinteger(L, constant->ValueInt32());
             break;
         case ConstantType::UInt32:
-            lua_pushinteger(L, value.ValueUInt32());
+            lua_pushinteger(L, constant->ValueUInt32());
             break;
         case ConstantType::Int64:
-            lua_pushinteger(L, value.ValueInt64());
+            lua_pushinteger(L, constant->ValueInt64());
             break;
         case ConstantType::UInt64:
-            lua_pushinteger(L, value.ValueUInt64());
+            lua_pushinteger(L, constant->ValueUInt64());
             break;
         case ConstantType::Float32:
-            lua_pushnumber(L, value.ValueFloat32());
+            lua_pushnumber(L, constant->ValueFloat32());
             break;
         case ConstantType::Float64:
-            lua_pushnumber(L, value.ValueFloat64());
+            lua_pushnumber(L, constant->ValueFloat64());
             break;
         case ConstantType::String:
         case ConstantType::Class:
@@ -216,21 +176,20 @@ namespace win32 {
         lua_rawset(L, -4);
         return 1;
     }
-    static int init_constants(lua_State* L, database const& db) {
-        static constants_t constants(db);
+    static int init_constants(lua_State* L, win32::cache const& cache) {
         lua_newtable(L);
         static luaL_Reg mt[] = {
             { "__index", constants_get },
             { NULL, NULL },
         };
         luaL_newlibtable(L, mt);
-        lua_pushlightuserdata(L, (void*)&constants);
+        lua_pushlightuserdata(L, (void*)&cache);
         luaL_setfuncs(L, mt, 1);
         lua_setmetatable(L, -2);
         return 1;
     }
-    static int init_version(lua_State* L, database const& db) {
-        auto version = db.Assembly[0].Version();
+    static int init_version(lua_State* L, win32::cache const& cache) {
+        auto version = cache.database().Assembly[0].Version();
         lua_newtable(L);
         lua_pushinteger(L, version.MajorVersion);
         lua_setfield(L, -2, "MajorVersion");
@@ -243,10 +202,10 @@ namespace win32 {
         return 1;
     }
     static int open(lua_State* L) {
-        static database db("Windows.Win32.winmd"sv);
+        static win32::cache db("Windows.Win32.winmd"sv);
         struct {
             const char* name;
-            int (*func)(lua_State* L, database const& db);
+            int (*func)(lua_State* L, win32::cache const& db);
         } init[] = {
             { "apis", init_apis },
             { "constants", init_constants },
