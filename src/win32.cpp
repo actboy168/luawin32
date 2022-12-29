@@ -14,6 +14,23 @@ namespace win32 {
         return {str, len};
     }
 
+    static TypeDef resolve_type(win32::cache const& cache, coded_index<TypeDefOrRef> const& type_index) {
+        if (type_index.type() == TypeDefOrRef::TypeDef) {
+            return type_index.TypeDef();
+        }
+        auto const& typeref = type_index.TypeRef();
+        return cache.find_required(typeref.TypeNamespace(), typeref.TypeName());
+    };
+
+    std::map<std::string_view, std::function<uintptr_t(lua_State*,int)>> FromLua = {
+        { "HWND", [](lua_State* L, int idx)->uintptr_t {
+            return 0;
+        }},
+        { "PSTR", [](lua_State* L, int idx)->uintptr_t {
+            return (uintptr_t)luaL_checkstring(L, idx);
+        }}
+    };
+
     class native_modules {
     public:
         void* find(std::string_view module, std::string_view api) {
@@ -41,26 +58,73 @@ namespace win32 {
         static int tolua(lua_State* L, TypeSig type, uintptr_t v) {
             return 0;
         }
-        static uintptr_t fromlua(lua_State* L, TypeSig type, int idx) {
-            if (type.ptr_count() > 0) {
-                switch (lua_type(L, idx)) {
-                case LUA_TNONE:
-                case LUA_TNIL:
-                    return 0;
-                case LUA_TSTRING:
-                    return (uintptr_t)luaL_checkstring(L, idx);
-                default:
-                    luaL_error(L, "#%d cannot be converted to pointer.", idx);
+        static uintptr_t fromlua(lua_State* L, const win32::cache* cache, TypeSig type, int idx) {
+            assert(type.ptr_count() == 0);
+            switch (type.element_type()) {
+            case ElementType::Void:
+                return 0;
+            case ElementType::ValueType: {
+                auto& type_index = std::get<coded_index<TypeDefOrRef>>(type.Type());
+                auto def = resolve_type(*cache, type_index);
+                auto name = def.TypeName();
+                if (def.is_enum()) {
+                    auto const& enum_def = def.get_enum_definition();
+                    switch (enum_def.m_underlying_type) {
+                    case ElementType::I1:
+                    case ElementType::U1:
+                    case ElementType::I2:
+                    case ElementType::U2:
+                    case ElementType::I4:
+                    case ElementType::U4:
+                    case ElementType::I8:
+                    case ElementType::U8:
+                    case ElementType::U:
+                    case ElementType::I:
+                        return luaL_checkinteger(L, idx);
+                    default:
+                        luaL_error(L, "#%d Unrecognized %s encountered.", idx, name.data());
+                        return 0;
+                    }
                     return 0;
                 }
+                auto it = FromLua.find(name);
+                if (it == FromLua.end()) {
+                    luaL_error(L, "#%d Unrecognized %s encountered.", idx, name.data());
+                    return 0;
+                }
+                return it->second(L, idx);
             }
-            return luaL_checkinteger(L, idx);
+            case ElementType::Boolean:
+            case ElementType::Char:
+            case ElementType::I1:
+            case ElementType::U1:
+            case ElementType::I2:
+            case ElementType::U2:
+            case ElementType::I4:
+            case ElementType::U4:
+            case ElementType::I8:
+            case ElementType::U8:
+            case ElementType::R4:
+            case ElementType::R8:
+            case ElementType::U:
+            case ElementType::I:
+            case ElementType::String:
+            case ElementType::Object:
+            case ElementType::GenericInst:
+            case ElementType::Class:
+            case ElementType::Var:
+            case ElementType::MVar:
+            default:
+                luaL_error(L, "#%d Unrecognized ELEMENT_TYPE encountered.", idx);
+                return 0;
+            }
         }
     };
 
     struct function {
-        function(const win32::api_t* api, void* address)
-            : m_signature(api->method.Signature())
+        function(const win32::cache* cache, const win32::api_t* api, void* address)
+            : m_cache(cache)
+            , m_signature(api->method.Signature())
             , m_caller(caller::create((uintptr_t)address, m_signature.ParamCount()))
         { }
         int run(lua_State* L) {
@@ -69,7 +133,7 @@ namespace win32 {
             }
             int i = 0;
             for (const auto& param : m_signature.Params()) {
-                m_caller->set(i, type_convert::fromlua(L, param.Type(), i + 1));
+                m_caller->set(i, type_convert::fromlua(L, m_cache, param.Type(), i + 1));
                 i++;
             }
             uintptr_t res = m_caller->call();
@@ -82,10 +146,11 @@ namespace win32 {
             function& f = *(function*)lua_touserdata(L, lua_upvalueindex(1));
             return f.run(L);
         }
-        static void push(lua_State* L, const win32::api_t* api, void* address) {
-            lua_pushlightuserdata(L, (void*)new function(api, address));
+        static void push(lua_State* L, const win32::cache* cache, const win32::api_t* api, void* address) {
+            lua_pushlightuserdata(L, (void*)new function(cache, api, address));
             lua_pushcclosure(L, luafunction, 1);
         }
+        const win32::cache* m_cache;
         MethodDefSig m_signature;
         caller*      m_caller;
     };
@@ -102,7 +167,7 @@ namespace win32 {
         if (!address) {
             return luaL_error(L, "%s can't load.", name.data());
         }
-        function::push(L, api, address);
+        function::push(L, cache, api, address);
         lua_pushvalue(L, -1);
         lua_insert(L, 2);
         lua_rawset(L, -4);

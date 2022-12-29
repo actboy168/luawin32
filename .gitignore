@@ -1,3 +1,4 @@
 /build/
 *.winmd
 /.vscode/settings.json
+/.vs
