@@ -549,12 +549,12 @@ namespace winmd::reader
         return result;
     }
 
-    MethodDef ImplMap::MemberForwarded() const
+    inline MethodDef ImplMap::MemberForwarded() const
     {
         return get_database().get_table<MethodDef>()[(get_value<uint32_t>(1) - 3) / 2];
     }
 
-    ModuleRef ImplMap::ImportScope() const
+    inline ModuleRef ImplMap::ImportScope() const
     {
         return get_target_row<ModuleRef>(3);
     }

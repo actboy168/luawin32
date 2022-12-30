@@ -1,11 +1,11 @@
 #pragma once
 
 #include <stdint.h>
+#include <lua.hpp>
+#include <functional>
+#include "cache.h"
 
 namespace win32 {
-    struct caller {
-        virtual uintptr_t call() const = 0;
-        virtual void      set(size_t i, uintptr_t v) = 0;
-        static caller*    create(uintptr_t f, size_t n);
-    };
+    using fromlua_t = std::function<uintptr_t(lua_State*,int)>;
+    bool create_caller(lua_State* L, uintptr_t f, win32::cache const* cache, winmd::reader::MethodDefSig const& sig);
 }
