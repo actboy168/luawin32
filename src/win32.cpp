@@ -150,6 +150,11 @@ namespace win32 {
         lua_setfield(L, -2, "RevisionNumber");
         return 1;
     }
+    static int func_memory(lua_State* L) {
+        size_t sz = (size_t)luaL_checkinteger(L, 1);
+        lua_newuserdatauv(L, sz, 0);
+        return 1;
+    }
     static int open(lua_State* L) {
         static win32::cache db("Windows.Win32.winmd"sv);
         struct {
@@ -166,6 +171,11 @@ namespace win32 {
             l->func(L, db);
             lua_setfield(L, -2, l->name);
         }
+        luaL_Reg func[] = {
+            { "memory", func_memory },
+            {NULL, NULL},
+        };
+        luaL_setfuncs(L, func, 0);
         return 1;
     }
 }
