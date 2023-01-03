@@ -6,6 +6,8 @@ local function u2w(str)
     local wlen = apis.MultiByteToWideChar(c.CP_UTF8, 0, str, #str, nil, 0)
     local wstr = win32.memory((wlen+1)*2)
     apis.MultiByteToWideChar(c.CP_UTF8, 0, str, #str, wstr, wlen)
+    wstr[2*wlen] = 0
+    wstr[2*wlen+1] = 0
     return wstr
 end
 

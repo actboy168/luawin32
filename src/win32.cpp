@@ -150,9 +150,52 @@ namespace win32 {
         lua_setfield(L, -2, "RevisionNumber");
         return 1;
     }
+    static int memory_tostring(lua_State* L) {
+        void* m = lua_touserdata(L, 1);
+        lua_Unsigned sz = lua_rawlen(L, 1);
+        lua_pushlstring(L, (const char*)m, (size_t)sz);
+        return 1;
+    }
+    static int memory_size(lua_State* L) {
+        lua_Unsigned sz = lua_rawlen(L, 1);
+        lua_pushinteger(L, (lua_Integer)sz);
+        return 1;
+    }
+    static int memory_read(lua_State* L) {
+        uint8_t* m = (uint8_t*)lua_touserdata(L, 1);
+        lua_Unsigned sz = lua_rawlen(L, 1);
+        lua_Integer i = luaL_checkinteger(L, 2);
+        if (i < 0 || i >= (lua_Integer)sz) {
+            return luaL_error(L, "win32::memory read overflow");
+        }
+        lua_pushinteger(L, m[i]);
+        return 1;
+    }
+    static int memory_write(lua_State* L) {
+        uint8_t* m = (uint8_t*)lua_touserdata(L, 1);
+        lua_Unsigned sz = lua_rawlen(L, 1);
+        lua_Integer i = luaL_checkinteger(L, 2);
+        lua_Integer v = luaL_checkinteger(L, 3);
+        if (i < 0 || i >= (lua_Integer)sz) {
+            return luaL_error(L, "win32::memory write overflow");
+        }
+        m[i] = (uint8_t)v;
+        return 0;
+    }
     static int func_memory(lua_State* L) {
         size_t sz = (size_t)luaL_checkinteger(L, 1);
         lua_newuserdatauv(L, sz, 0);
+        if (luaL_newmetatable(L, "win32::memory")) {
+            luaL_Reg l[] = {
+                { "__tostring", memory_tostring },
+                { "__len", memory_size},
+                { "__index", memory_read },
+                { "__newindex", memory_write },
+                { NULL, NULL },
+            };
+            luaL_setfuncs(L, l, 0);
+        }
+        lua_setmetatable(L, -2);
         return 1;
     }
     static int open(lua_State* L) {
