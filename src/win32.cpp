@@ -198,27 +198,31 @@ namespace win32 {
         return 1;
     }
     static int open(lua_State* L) {
-        static win32::cache db("Windows.Win32.winmd"sv);
-        struct {
-            const char* name;
-            int (*func)(lua_State* L, win32::cache const& db);
-        } init[] = {
-            { "apis", init_apis },
-            { "constants", init_constants },
-            { "version", init_version },
-            { NULL, NULL },
-        };
-        lua_newtable(L);
-        for (auto l = init; l->name != NULL; l++) {
-            l->func(L, db);
-            lua_setfield(L, -2, l->name);
+        try {
+            static win32::cache db("Windows.Win32.winmd"sv);
+            struct {
+                const char* name;
+                int (*func)(lua_State* L, win32::cache const& db);
+            } init[] = {
+                { "apis", init_apis },
+                { "constants", init_constants },
+                { "version", init_version },
+                { NULL, NULL },
+            };
+            lua_newtable(L);
+            for (auto l = init; l->name != NULL; l++) {
+                l->func(L, db);
+                lua_setfield(L, -2, l->name);
+            }
+            luaL_Reg func[] = {
+                { "memory", func_memory },
+                {NULL, NULL},
+            };
+            luaL_setfuncs(L, func, 0);
+            return 1;
+        } catch (std::exception const& e) {
+            return luaL_error(L, "%s", e.what());
         }
-        luaL_Reg func[] = {
-            { "memory", func_memory },
-            {NULL, NULL},
-        };
-        luaL_setfuncs(L, func, 0);
-        return 1;
     }
 }
 
