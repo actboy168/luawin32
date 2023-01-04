@@ -47,8 +47,7 @@ namespace win32 {
         if (!address) {
             return luaL_error(L, "%s can't load.", name.data());
         }
-        MethodDefSig signature = api->method.Signature();
-        bool ok = create_caller(L, (uintptr_t)address, cache, signature);
+        bool ok = create_caller(L, (uintptr_t)address, cache, api->method);
         if (!ok) {
             return luaL_error(L, "%s has too many parameters.", name.data());
         }

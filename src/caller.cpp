@@ -16,16 +16,40 @@ namespace win32 {
     };
 
     using fromlua_t = std::function<uintptr_t(lua_State*,int)>;
+    using generate_fromlua_t = std::function<fromlua_t(ParamAttributes)>;
 
     fromlua_t fromlua_invalid = [](lua_State*,int) { return 0; };
     fromlua_t fromlua_void = [](lua_State*,int) { return 0; };
     fromlua_t fromlua_int  = [](lua_State* L,int idx) { return luaL_checkinteger(L, idx); };
-
-    std::map<std::string_view, fromlua_t> FromLua = {
-        { "HWND", [](lua_State* L, int idx)->uintptr_t {
-            return 0;
-        }},
-        { "PSTR", [](lua_State* L, int idx)->uintptr_t {
+    auto fromlua_string = [](ParamAttributes attribute)->fromlua_t {
+        if (attribute.Out()) {
+            if (!attribute.Optional()) {
+                return [](lua_State* L, int idx)->uintptr_t {
+                    luaL_checktype(L, idx, LUA_TUSERDATA);
+                    return (uintptr_t)lua_touserdata(L, idx);
+                };
+            }
+            return [](lua_State* L, int idx)->uintptr_t {
+                switch (lua_type(L, idx)) {
+                case LUA_TNIL:
+                    return 0;
+                default:
+                    luaL_checktype(L, idx, LUA_TUSERDATA);
+                    return (uintptr_t)lua_touserdata(L, idx);
+                }
+            };
+        }
+        if (!attribute.Optional()) {
+            return [](lua_State* L, int idx)->uintptr_t {
+                switch (lua_type(L, idx)) {
+                case LUA_TUSERDATA:
+                    return (uintptr_t)lua_touserdata(L, idx);
+                default:
+                    return (uintptr_t)luaL_checkstring(L, idx);
+                }
+            };
+        }
+        return [](lua_State* L, int idx)->uintptr_t {
             switch (lua_type(L, idx)) {
             case LUA_TNIL:
                 return 0;
@@ -34,20 +58,20 @@ namespace win32 {
             default:
                 return (uintptr_t)luaL_checkstring(L, idx);
             }
-        }},
-        { "PWSTR", [](lua_State* L, int idx)->uintptr_t {
-            switch (lua_type(L, idx)) {
-            case LUA_TNIL:
+        };
+    };
+    std::map<std::string_view, generate_fromlua_t> FromLua = {
+        { "HWND", [](ParamAttributes attribute) {
+            return [](lua_State* L, int idx)->uintptr_t {
+                //TODO
                 return 0;
-            case LUA_TUSERDATA:
-                return (uintptr_t)lua_touserdata(L, idx);
-            default:
-                return (uintptr_t)luaL_checkstring(L, idx);
-            }
-        }}
+            };
+        }},
+        { "PSTR", fromlua_string },
+        { "PWSTR", fromlua_string }
     };
 
-    static fromlua_t fromlua(lua_State* L, const win32::cache* cache, TypeSig type, int idx) {
+    static fromlua_t fromlua(lua_State* L, const win32::cache* cache, TypeSig type, ParamAttributes attribute, int idx) {
         assert(type.ptr_count() == 0);
         switch (type.element_type()) {
         case ElementType::Void:
@@ -81,7 +105,7 @@ namespace win32 {
                 luaL_error(L, "#%d Unrecognized %s encountered.", idx, name.data());
                 return fromlua_invalid;
             }
-            return it->second;
+            return it->second(attribute);
         }
         case ElementType::I1:
         case ElementType::U1:
@@ -225,14 +249,17 @@ namespace win32 {
             caller& c = *(caller*)lua_touserdata(L, lua_upvalueindex(1));
             return c.call_impl(L, std::make_index_sequence<paramN>());
         }
-        static void create(lua_State* L, uintptr_t f, win32::cache const* cache, winmd::reader::MethodDefSig const& sig) {
+        static void create(lua_State* L, uintptr_t f, win32::cache const* cache, winmd::reader::MethodDef const& method) {
             caller* c = (caller*)lua_newuserdatauv(L, sizeof(caller), 0);
             new (c) caller{f};
-            int i = 1;
-            for (const auto& param : sig.Params()) {
-                auto f = fromlua(L, cache, param.Type(), i);
-                c->set_param(i-1, f);
-                i++;
+            auto sig = method.Signature();
+            auto params_sig = sig.Params();
+            auto params_lst = method.ParamList();
+            for (size_t i = 0; i < paramN; ++i) {
+                auto const& param = *(params_lst.first + (int32_t)i);
+                auto const& paramSig = *(params_sig.first + i);
+                auto f = fromlua(L, cache, paramSig.Type(), param.Flags(), (int)i+1);
+                c->set_param(i, f);
             }
             if constexpr (hasR) {
                 auto f = tolua(L, cache, sig.ReturnType().Type());
@@ -242,34 +269,35 @@ namespace win32 {
         }
     };
 
-    bool create_caller(lua_State* L, uintptr_t f, win32::cache const* cache, winmd::reader::MethodDefSig const& sig) {
+    bool create_caller(lua_State* L, uintptr_t f, win32::cache const* cache, winmd::reader::MethodDef const& method) {
+        auto sig = method.Signature();
         if (sig.ReturnType()) {
             switch (sig.ParamCount()) {
-            case 0: caller<true, 0>::create(L, f, cache, sig); return true;
-            case 1: caller<true, 1>::create(L, f, cache, sig); return true;
-            case 2: caller<true, 2>::create(L, f, cache, sig); return true;
-            case 3: caller<true, 3>::create(L, f, cache, sig); return true;
-            case 4: caller<true, 4>::create(L, f, cache, sig); return true;
-            case 5: caller<true, 5>::create(L, f, cache, sig); return true;
-            case 6: caller<true, 6>::create(L, f, cache, sig); return true;
-            case 7: caller<true, 7>::create(L, f, cache, sig); return true;
-            case 8: caller<true, 8>::create(L, f, cache, sig); return true;
-            case 9: caller<true, 9>::create(L, f, cache, sig); return true;
+            case 0: caller<true, 0>::create(L, f, cache, method); return true;
+            case 1: caller<true, 1>::create(L, f, cache, method); return true;
+            case 2: caller<true, 2>::create(L, f, cache, method); return true;
+            case 3: caller<true, 3>::create(L, f, cache, method); return true;
+            case 4: caller<true, 4>::create(L, f, cache, method); return true;
+            case 5: caller<true, 5>::create(L, f, cache, method); return true;
+            case 6: caller<true, 6>::create(L, f, cache, method); return true;
+            case 7: caller<true, 7>::create(L, f, cache, method); return true;
+            case 8: caller<true, 8>::create(L, f, cache, method); return true;
+            case 9: caller<true, 9>::create(L, f, cache, method); return true;
             default: return false;
             }
         }
         else {
             switch (sig.ParamCount()) {
-            case 0: caller<false, 0>::create(L, f, cache, sig); return true;
-            case 1: caller<false, 1>::create(L, f, cache, sig); return true;
-            case 2: caller<false, 2>::create(L, f, cache, sig); return true;
-            case 3: caller<false, 3>::create(L, f, cache, sig); return true;
-            case 4: caller<false, 4>::create(L, f, cache, sig); return true;
-            case 5: caller<false, 5>::create(L, f, cache, sig); return true;
-            case 6: caller<false, 6>::create(L, f, cache, sig); return true;
-            case 7: caller<false, 7>::create(L, f, cache, sig); return true;
-            case 8: caller<false, 8>::create(L, f, cache, sig); return true;
-            case 9: caller<false, 9>::create(L, f, cache, sig); return true;
+            case 0: caller<false, 0>::create(L, f, cache, method); return true;
+            case 1: caller<false, 1>::create(L, f, cache, method); return true;
+            case 2: caller<false, 2>::create(L, f, cache, method); return true;
+            case 3: caller<false, 3>::create(L, f, cache, method); return true;
+            case 4: caller<false, 4>::create(L, f, cache, method); return true;
+            case 5: caller<false, 5>::create(L, f, cache, method); return true;
+            case 6: caller<false, 6>::create(L, f, cache, method); return true;
+            case 7: caller<false, 7>::create(L, f, cache, method); return true;
+            case 8: caller<false, 8>::create(L, f, cache, method); return true;
+            case 9: caller<false, 9>::create(L, f, cache, method); return true;
             default: return false;
             }
         }
