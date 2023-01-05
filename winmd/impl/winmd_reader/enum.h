@@ -319,6 +319,23 @@ namespace winmd::reader
         EnableJITcompileTracking = 0x8000,
     };
 
+    enum class PInvokeAttributes : uint16_t
+    {
+        NoMangle = 0x0001,
+        CharSetMask = 0x0006,
+        CharSetNotSpec = 0x0000,
+        CharSetAnsi = 0x0002,
+        CharSetUnicode = 0x0004,
+        CharSetAuto = 0x0006,
+        SupportsLastError = 0x0040,
+        CallConvMask  = 0x0700,
+        CallConvPlatformapi = 0x0100,
+        CallConvCdecl = 0x0200,
+        CallConvStdcall = 0x0300,
+        CallConvThiscall = 0x0400,
+        CallConvFastcall = 0x0500,
+    };
+
     template <typename T>
     constexpr inline T enum_mask(T value, T mask) noexcept
     {

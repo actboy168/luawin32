@@ -43,11 +43,16 @@ namespace win32 {
         if (!api) {
             return luaL_error(L, "%s not found.", name.data());
         }
-        void* address = native_apis.find(api->module, name);
+        auto module = api->ImportScope().Name();
+        void* address = native_apis.find(module, name);
         if (!address) {
             return luaL_error(L, "%s can't load.", name.data());
         }
-        bool ok = create_caller(L, (uintptr_t)address, cache, api->method);
+        auto callconv = enum_mask(api->MappingFlags(), PInvokeAttributes::CallConvMask);
+        if (callconv != PInvokeAttributes::CallConvPlatformapi && callconv != PInvokeAttributes::CallConvStdcall) {
+            return luaL_error(L, "%s calling convention not implemented.", name.data());
+        }
+        bool ok = create_caller(L, (uintptr_t)address, cache, api->MemberForwarded());
         if (!ok) {
             return luaL_error(L, "%s has too many parameters.", name.data());
         }

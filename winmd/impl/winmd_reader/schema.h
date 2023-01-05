@@ -431,7 +431,7 @@ namespace winmd::reader
 
         auto MappingFlags() const
         {
-            return get_value<uint16_t>(0);
+            return PInvokeAttributes { get_value<uint16_t>(0) };
         }
 
         MethodDef MemberForwarded() const;

@@ -4,12 +4,6 @@
 using namespace winmd::reader;
 
 namespace win32 {
-    struct api_t {
-        std::string_view module;
-        MethodDef        method;
-        uint16_t         flags;
-    };
-
     struct cache {
         cache() = default;
         cache(cache const&) = delete;
@@ -30,11 +24,7 @@ namespace win32 {
                 m_nested_types[row.EnclosingType()].push_back(row.NestedType());
             }
             for (auto&& impl : db.ImplMap) {
-                m_apis.try_emplace(impl.ImportName(), api_t {
-                    impl.ImportScope().Name(),
-                    impl.MemberForwarded(),
-                    impl.MappingFlags()
-                });
+                m_apis.try_emplace(impl.ImportName(), impl);
             }
             for (auto&& field : db.Field) {
                 m_constants.try_emplace(field.Name(), field.Constant());
@@ -127,7 +117,7 @@ namespace win32 {
         winmd::reader::database m_database;
         std::map<std::string_view, namespace_members> m_namespaces;
         std::map<TypeDef, std::vector<TypeDef>> m_nested_types;
-        std::map<std::string_view, api_t> m_apis;
+        std::map<std::string_view, ImplMap> m_apis;
         std::map<std::string_view, Constant> m_constants;
     };
 }
