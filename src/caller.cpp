@@ -20,7 +20,17 @@ namespace win32 {
 
     fromlua_t fromlua_invalid = [](lua_State*,int) { return 0; };
     fromlua_t fromlua_void = [](lua_State*,int) { return 0; };
-    fromlua_t fromlua_int  = [](lua_State* L,int idx) { return luaL_checkinteger(L, idx); };
+    fromlua_t fromlua_integer = [](lua_State* L,int idx) { return luaL_checkinteger(L, idx); };
+    fromlua_t fromlua_pointer = [](lua_State* L,int idx)->uintptr_t {
+        switch (lua_type(L, idx)) {
+        case LUA_TNIL:
+            return 0;
+        default:
+            luaL_checktype(L, idx, LUA_TUSERDATA);
+            return (uintptr_t)lua_touserdata(L, idx);
+        }
+        return 0;
+    };
     auto fromlua_string = [](ParamAttributes attribute)->fromlua_t {
         if (attribute.Out()) {
             if (!attribute.Optional()) {
@@ -72,7 +82,9 @@ namespace win32 {
     };
 
     static fromlua_t fromlua(lua_State* L, const win32::cache* cache, TypeSig type, ParamAttributes attribute, int idx) {
-        assert(type.ptr_count() == 0);
+        if (type.ptr_count() > 0) {
+            return fromlua_pointer;
+        }
         switch (type.element_type()) {
         case ElementType::Void:
             return fromlua_void;
@@ -93,7 +105,7 @@ namespace win32 {
                 case ElementType::U8:
                 case ElementType::U:
                 case ElementType::I:
-                    return fromlua_int;
+                    return fromlua_integer;
                 default:
                     break;
                 }
@@ -117,7 +129,7 @@ namespace win32 {
         case ElementType::U8:
         case ElementType::U:
         case ElementType::I:
-            return fromlua_int;
+            return fromlua_integer;
         case ElementType::Boolean:
         case ElementType::Char:
         case ElementType::R4:
@@ -138,12 +150,17 @@ namespace win32 {
 
     tolua_t tolua_invalid = [](lua_State*, uintptr_t) { return 0; };
     tolua_t tolua_void = [](lua_State*, uintptr_t) { return 0; };
-    tolua_t tolua_int = [](lua_State* L, uintptr_t v) {
+    tolua_t tolua_integer = [](lua_State* L, uintptr_t v) {
         lua_pushinteger(L, v);
+        return 1;
+    };
+    tolua_t tolua_boolean = [](lua_State* L, uintptr_t v) {
+        lua_pushboolean(L, v? 1: 0);
         return 1;
     };
 
     std::map<std::string_view, tolua_t> ToLua = {
+        { "BOOL", tolua_boolean }
     };
 
     static tolua_t tolua(lua_State* L, const win32::cache* cache, TypeSig type) {
@@ -168,7 +185,7 @@ namespace win32 {
                 case ElementType::U8:
                 case ElementType::U:
                 case ElementType::I:
-                    return tolua_int;
+                    return tolua_integer;
                 default:
                     break;
                 }
@@ -192,8 +209,9 @@ namespace win32 {
         case ElementType::U8:
         case ElementType::U:
         case ElementType::I:
-            return tolua_int;
+            return tolua_integer;
         case ElementType::Boolean:
+            return tolua_boolean;
         case ElementType::Char:
         case ElementType::R4:
         case ElementType::R8:
